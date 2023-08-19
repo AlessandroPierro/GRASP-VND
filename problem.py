@@ -1,5 +1,9 @@
 import networkx as netx
 import numpy as np
+import seaborn as sns
+from matplotlib import pyplot as plt
+
+sns.set_theme(style="white")
 
 
 class CUAVRP:
@@ -21,7 +25,7 @@ class CUAVRP:
     def graph(self) -> netx.Graph:
         """Returns the graph of the problem."""
         return self._graph
-    
+
     @property
     def num_nodes(self) -> int:
         """Returns the number of nodes in the graph."""
@@ -31,36 +35,27 @@ class CUAVRP:
     def num_uavs(self) -> int:
         """Returns the max umber of UAVs in the problem."""
         return self._num_uavs
-    
+
     @property
     def max_travel_time(self) -> float:
         """Returns the maximum travel time of the UAVs."""
         return self._max_travel_time
 
-    def is_feasible(self, solution: set) -> bool:
-        """Returns True if the solution is feasible, False otherwise."""
-        if solution is None:
-            return False
-        else:
-            print(f"solution {solution}")
-            sol_set = set([0])
-            for s in solution:
-                for e in s:
-                    sol_set.add(e)
-                    print("adding e ", e)
-            print("sol_set", sol_set)
-            if len(sol_set) == self.num_nodes:
-                return True
-            else:
-                return False
-    
     def plot_graph(self) -> None:
         """Plots the graph of the problem, using netx and seaborn."""
-        #plot
-        import seaborn as sns
-        from matplotlib import pyplot as plt
-        sns.set_theme(style="white")
         fig, ax = plt.subplots(figsize=(10, 10))
         netx.draw_networkx(self.graph, ax=ax)
         plt.savefig("graph.png")
 
+    def evaluate(self, solution: set) -> float:
+        """Returns the cost of the solution."""
+        total_cost = 0
+        for route in solution:
+            if len(route) == 1:
+                continue
+            edge_lengths = [
+                self._graph.edges[route[i - 1], route[i]]["weight"]
+                for i in range(1, len(route))
+            ]
+            total_cost += sum(np.cumsum(edge_lengths))
+        return total_cost
