@@ -40,6 +40,8 @@ class ConstructiveHeuristic:
                     ):
                         is_infeasible = True
                         break
+                    if self._compute_route_cost(route) > self._compute_route_cost(route, reverse=True):
+                        route = list(reversed(route))
                     solution.add(tuple(route))
                     if len(solution) > self._problem.num_uavs:
                         is_infeasible = True
@@ -53,6 +55,8 @@ class ConstructiveHeuristic:
             if self._compute_route_length(route) > self._problem.max_travel_time:
                 is_infeasible = True
                 continue
+            if self._compute_route_cost(route) > self._compute_route_cost(route, reverse=True):
+                route = list(reversed(route))
             solution.add(tuple(route))
             if len(solution) > self._problem.num_uavs:
                 is_infeasible = True
@@ -127,3 +131,12 @@ class ConstructiveHeuristic:
                 "weight"
             ]
         return current_length
+    
+    def _compute_route_cost(self, route: List[int], reverse: bool = False) -> float:
+        """Compute route cost as the sum of the cumulative traveled distance at each node."""
+        if len(route) == 1:
+            return 0
+        edge_lengths = [self._problem.graph.edges[route[i - 1], route[i]]["weight"] for i in range(1, len(route))]
+        if reverse:
+            edge_lengths = edge_lengths[::-1]
+        return sum(np.cumsum(edge_lengths))
