@@ -9,14 +9,14 @@ if __name__ == '__main__':
         density=0.6,
         distance_fn=euclidean_distance,
         num_uavs=3,
-        max_travel_time=10
+        max_travel_time=15
     )
 
     heuristic = ConstructiveHeuristic(
         problem,
-        alpha=0.5,
+        alpha=0.8,
         w_0 = 0.4,
         r_d=1
     )
-
-    print(heuristic.construct_feasible_solution())
+    for i in range(10):
+        print(heuristic.construct_feasible_solution())
