@@ -1,5 +1,5 @@
 import random
-from typing import List, Set, Tuple
+from typing import Any, List, Set, Tuple
 
 import numpy as np
 
@@ -40,7 +40,9 @@ class ConstructiveHeuristic:
                     ):
                         is_infeasible = True
                         break
-                    if self._compute_route_cost(route) > self._compute_route_cost(route, reverse=True):
+                    if self._compute_route_cost(route) > self._compute_route_cost(
+                        route, reverse=True
+                    ):
                         route = list(reversed(route))
                     solution.add(tuple(route))
                     if len(solution) > self._problem.num_uavs:
@@ -55,7 +57,9 @@ class ConstructiveHeuristic:
             if self._compute_route_length(route) > self._problem.max_travel_time:
                 is_infeasible = True
                 continue
-            if self._compute_route_cost(route) > self._compute_route_cost(route, reverse=True):
+            if self._compute_route_cost(route) > self._compute_route_cost(
+                route, reverse=True
+            ):
                 route = list(reversed(route))
             solution.add(tuple(route))
             if len(solution) > self._problem.num_uavs:
@@ -131,12 +135,65 @@ class ConstructiveHeuristic:
                 "weight"
             ]
         return current_length
-    
+
     def _compute_route_cost(self, route: List[int], reverse: bool = False) -> float:
         """Compute route cost as the sum of the cumulative traveled distance at each node."""
         if len(route) == 1:
             return 0
-        edge_lengths = [self._problem.graph.edges[route[i - 1], route[i]]["weight"] for i in range(1, len(route))]
+        edge_lengths = [
+            self._problem.graph.edges[route[i - 1], route[i]]["weight"]
+            for i in range(1, len(route))
+        ]
         if reverse:
             edge_lengths = edge_lengths[::-1]
         return sum(np.cumsum(edge_lengths))
+
+
+class GRASPVND:
+    def __init__(
+        self,
+        problem: CUAVRP,
+        grasp_iters: int,
+        num_constructed: int,
+        alpha: float,
+        w_0: float,
+        r_d: float,
+    ) -> None:
+        self._problem = problem
+        self._grasp_iters = grasp_iters
+        self._num_constructed = num_constructed
+        self._alpha = alpha
+        self._w_0 = w_0
+        self._r_d = r_d
+        self._constructive_heuristic = ConstructiveHeuristic(problem, alpha, w_0, r_d)
+
+    def run(self):
+        best_solution_found = None
+        best_solution_cost = None
+        for i in range(self._grasp_iters):
+            best_constructed = (
+                self._constructive_heuristic.construct_feasible_solution()
+            )
+            best_constructed_cost = self._problem.evaluate(best_constructed)
+            for j in range(self._num_constructed):
+                S = self._constructive_heuristic.construct_feasible_solution()
+                S_cost = self._problem.evaluate(S)
+                if S_cost < best_constructed_cost:
+                    best_constructed = S
+                    best_constructed_cost = S_cost
+            improved_solution = self.thread_strategy(best_constructed)
+            improved_solution_cost = self._problem.evaluate(improved_solution)
+            if (
+                best_solution_cost is None
+                or improved_solution_cost < best_solution_cost
+            ):
+                best_solution_found = improved_solution
+                best_solution_cost = improved_solution_cost
+            # self.intensification_method(best_solution_found)
+        return best_solution_found
+
+    def thread_strategy(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
+        return solution
+
+    def intensification_method(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
+        raise NotImplementedError
