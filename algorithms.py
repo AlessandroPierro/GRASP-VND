@@ -1,3 +1,6 @@
+import copy
+from enum import Enum
+import multiprocessing
 import random
 from typing import Any, List, Set, Tuple
 
@@ -149,12 +152,33 @@ class ConstructiveHeuristic:
         return sum(np.cumsum(edge_lengths))
 
 
+class ThreadStrategy(Enum):
+    ALL_RETURN = 0
+    BEST_CONTINUE = 1
+    RANDOM_RETURN = 2
+
+
+class LocalMoves(Enum):
+    ONE_ONE_SWAP = 0
+    ADJACENT_SWAP = 1
+    TWO_OPT = 2
+    ONE_ZERO_RELOCATION = 3
+    TWO_ZERO_RELOCATION = 4
+    ONE_ONE_EXCHANGE = 5
+    TWO_ONE_EXCHANGE = 6
+    TWO_TWO_EXCHANGE = 7
+    THREE_THREE_EXCHANGE = 8
+
+
 class GRASPVND:
     def __init__(
         self,
         problem: CUAVRP,
         grasp_iters: int,
         num_constructed: int,
+        vnd_iters: int,
+        thread_strategy: ThreadStrategy,
+        num_threads: int,
         alpha: float,
         w_0: float,
         r_d: float,
@@ -162,10 +186,16 @@ class GRASPVND:
         self._problem = problem
         self._grasp_iters = grasp_iters
         self._num_constructed = num_constructed
+        self._vnd_iters = vnd_iters
+        self._thread_strategy = thread_strategy
+        self._num_threads = num_threads
         self._alpha = alpha
         self._w_0 = w_0
         self._r_d = r_d
         self._constructive_heuristic = ConstructiveHeuristic(problem, alpha, w_0, r_d)
+
+        self._best_continue_solution = None
+        self._random_return_solution = None
 
     def run(self):
         best_solution_found = None
@@ -181,7 +211,7 @@ class GRASPVND:
                 if S_cost < best_constructed_cost:
                     best_constructed = S
                     best_constructed_cost = S_cost
-            improved_solution = self.thread_strategy(best_constructed)
+            improved_solution = self._apply_thread_strategy(best_constructed)
             improved_solution_cost = self._problem.evaluate(improved_solution)
             if (
                 best_solution_cost is None
@@ -192,8 +222,109 @@ class GRASPVND:
             # self.intensification_method(best_solution_found)
         return best_solution_found
 
-    def thread_strategy(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
-        return solution
+    def _apply_thread_strategy(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
+        pool = multiprocessing.Pool(self._num_threads)
+        if self._thread_strategy == ThreadStrategy.ALL_RETURN:
+            results = pool.map(
+                self._vnd,
+                map(lambda k: copy.deepcopy(solution), range(self._num_threads)),
+            )
+            improved_solution = min(results, key=lambda k: self._problem.evaluate(k))
+        elif self._thread_strategy == ThreadStrategy.BEST_CONTINUE:
+            if self._best_continue_solution is None:
+                self._best_continue_solution = copy.deepcopy(solution)
+            results = pool.map(
+                self._vnd,
+                map(
+                    lambda k: copy.deepcopy(solution)
+                    if k < self._num_threads - 1
+                    else copy.deepcopy(self._best_continue_solution),
+                    range(self._num_threads),
+                ),
+            )
+            improved_solution = min(results, key=lambda k: self._problem.evaluate(k))
+            self._best_continue_solution = copy.deepcopy(improved_solution)
+        elif self._thread_strategy == ThreadStrategy.RANDOM_RETURN:
+            if self._random_return_solution is None:
+                self._random_return_solution = copy.deepcopy(solution)
+            results = pool.map(
+                self._vnd,
+                map(
+                    lambda k: copy.deepcopy(solution)
+                    if k < self._num_threads - 1
+                    else copy.deepcopy(self._random_return_solution),
+                    range(self._num_threads),
+                ),
+            )
+            improved_solution = min(results, key=lambda k: self._problem.evaluate(k))
+            self._random_return_solution = copy.deepcopy(random.choice(results))
+        else:
+            pool.close()
+            raise ValueError("Invalid thread strategy")
+        pool.close()
+        return improved_solution
 
     def intensification_method(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
+        raise NotImplementedError
+
+    def _vnd(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
+        for i in range(self._vnd_iters):
+            routes = random.sample(solution, 2)
+            route_1 = copy.deepcopy(routes[0])
+            route_2 = copy.deepcopy(routes[1])
+            for move in LocalMoves:
+                improves = True
+                move_func = getattr(self, "_" + move.name.lower())
+                while improves:
+                    route_1, route_2, improves = move_func(route_1, route_2)
+                    if improves:
+                        solution.remove(routes[0])
+                        solution.remove(routes[1])
+                        solution.add(tuple(route_1))
+                        solution.add(tuple(route_2))
+        return solution
+
+    def _one_one_swap(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _adjacent_swap(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _two_opt(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _one_zero_relocation(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _two_zero_relocation(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _one_one_exchange(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _two_one_exchange(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _two_two_exchange(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+        raise NotImplementedError
+
+    def _three_three_exchange(
+        self, route_1: Tuple[int], route_2: Tuple[int]
+    ) -> Tuple[Tuple[int], Tuple[int], bool]:
         raise NotImplementedError
