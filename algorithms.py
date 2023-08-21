@@ -13,7 +13,19 @@ from tqdm.auto import tqdm
 
 class ConstructiveHeuristic:
     """
-    Class describing a constructive heuristic for the CUAVRP.
+    A class representing a constructive heuristic for the Capacitated UAV Routing Problem (CUAVRP).
+
+    Attributes:
+        problem (CUAVRP): The CUAVRP problem instance.
+        alpha (float): A parameter used to generate the restricted candidate list (RCL).
+        w_0 (float): A parameter used to initialize the weights matrix.
+        r_d (float): A parameter used to compute the RCL.
+
+    Methods:
+        construct_feasible_solution() -> Set[Tuple[int]]: Constructs a feasible solution for the problem.
+        generate_rcl(candidates: Set[int], route: List[int]) -> Set[int]: Generates the RCL for a given set of candidates and a current route.
+        weighted_choice(rcl: Set[int]) -> int: Chooses a candidate from the RCL using the weights matrix.
+        divertisication_method(solution: set) -> set: Applies a diversification method to the solution (not implemented).
     """
 
     def __init__(self, problem: CUAVRP, alpha: float, w_0: float, r_d: float) -> None:
@@ -23,12 +35,6 @@ class ConstructiveHeuristic:
         self._r_d = r_d
 
     def construct_feasible_solution(self) -> Set[Tuple[int]]:
-        """
-        Constructs a feasible solution for the problem.
-
-        Returns:
-            A set of tuples, each tuple representing a route.
-        """
         random.seed()
         is_infeasible = True
         while is_infeasible:
@@ -40,42 +46,62 @@ class ConstructiveHeuristic:
             while len(remaining_nodes) > 0:
                 rcl = self.generate_rcl(remaining_nodes, route)
                 if rcl is not None:
+                    rcl.add(0)
                     next = self.weighted_choice(rcl)
                     route.append(next)
-                    remaining_nodes.remove(next)
+                    if next != 0:
+                        remaining_nodes.remove(next)
+                    else:
+                        if len(solution) + 1 > self._problem.num_uavs:
+                            is_infeasible = True
+                            break
+                        if (
+                            self._problem.evaluate_route_length(route)
+                            > self._problem.max_travel_time
+                        ):
+                            is_infeasible = True
+                            break
+                        if self._problem.evaluate_route_cost(
+                            route
+                        ) > self._problem.evaluate_route_cost(list(reversed(route))):
+                            route = list(reversed(route))
+                        solution.add(tuple(route))
+                        next = 0
+                        route = [next]
                 else:
                     route.append(0)
+                    if len(solution) + 1 > self._problem.num_uavs:
+                        is_infeasible = True
+                        break
                     if (
-                        self._compute_route_length(route)
+                        self._problem.evaluate_route_length(route)
                         > self._problem.max_travel_time
                     ):
                         is_infeasible = True
                         break
-                    if self._compute_route_cost(route) > self._compute_route_cost(
-                        route, reverse=True
-                    ):
+                    if self._problem.evaluate_route_cost(
+                        route
+                    ) > self._problem.evaluate_route_cost(list(reversed(route))):
                         route = list(reversed(route))
                     solution.add(tuple(route))
-                    if len(solution) > self._problem.num_uavs:
-                        is_infeasible = True
-                        break
                     next = 0
                     route = [next]
-            if is_infeasible:
+            if is_infeasible or len(solution) + 1 > self._problem.num_uavs:
+                is_infeasible = True
                 continue
             if route[-1] != 0:
                 route.append(0)
-            if self._compute_route_length(route) > self._problem.max_travel_time:
+            if (
+                self._problem.evaluate_route_length(route)
+                > self._problem.max_travel_time
+            ):
                 is_infeasible = True
                 continue
-            if self._compute_route_cost(route) > self._compute_route_cost(
-                route, reverse=True
-            ):
+            if self._problem.evaluate_route_cost(
+                route
+            ) > self._problem.evaluate_route_cost(list(reversed(route))):
                 route = list(reversed(route))
             solution.add(tuple(route))
-            if len(solution) > self._problem.num_uavs:
-                is_infeasible = True
-                continue
             is_infeasible = False
             # self.divertisication_method(solution)
         return solution
@@ -137,28 +163,6 @@ class ConstructiveHeuristic:
     def divertisication_method(self, solution: set) -> set:
         raise NotImplementedError
 
-    def _compute_route_length(self, route: List[int]) -> float:
-        current_length = 0
-        if len(route) == 1:
-            return 0
-        for i in range(1, len(route)):
-            current_length += self._problem.graph.edges[route[i - 1], route[i]][
-                "weight"
-            ]
-        return current_length
-
-    def _compute_route_cost(self, route: List[int], reverse: bool = False) -> float:
-        """Compute route cost as the sum of the cumulative traveled distance at each node."""
-        if len(route) == 1:
-            return 0
-        edge_lengths = [
-            self._problem.graph.edges[route[i - 1], route[i]]["weight"]
-            for i in range(1, len(route))
-        ]
-        if reverse:
-            edge_lengths = edge_lengths[::-1]
-        return sum(np.cumsum(edge_lengths))
-
 
 class ThreadStrategy(Enum):
     ALL_RETURN = 0
@@ -219,7 +223,16 @@ class GRASPVND:
                 if S_cost < best_constructed_cost:
                     best_constructed = S
                     best_constructed_cost = S_cost
-            improved_solution = self._apply_thread_strategy(best_constructed)
+            if best_constructed_cost is not None and (
+                best_solution_cost is None or best_constructed_cost < best_solution_cost
+            ):
+                best_solution_found = best_constructed
+                best_solution_cost = best_constructed_cost
+                print(
+                    f"Constructive heuristic found new best solution with cost {best_solution_cost} at iteration {i}"
+                )
+                print(f"New best solution is {best_solution_found}")
+            improved_solution = self._apply_thread_strategy(best_solution_found)
             improved_solution_cost = self._problem.evaluate(improved_solution)
             if (
                 best_solution_cost is None
@@ -228,9 +241,9 @@ class GRASPVND:
                 best_solution_found = improved_solution
                 best_solution_cost = improved_solution_cost
                 print(
-                    f"Found new best solution with cost {best_solution_cost} at iteration {i}"
+                    f"Local search found new best solution with cost {best_solution_cost} at iteration {i}"
                 )
-                print(f"Best solution found so far: {best_solution_found}")
+                print(f"New best solution is {best_solution_found}")
             # self.intensification_method(best_solution_found)
         return best_solution_found
 
@@ -283,7 +296,6 @@ class GRASPVND:
         random.seed()
         for i in range(self._vnd_iters):
             route = tuple(random.sample(solution, 1)[0])
-            route_cost = self._problem.evaluate_route_cost(route)
             for move in [
                 LocalMoves.ONE_ONE_SWAP,
                 LocalMoves.ADJACENT_SWAP,
@@ -298,12 +310,14 @@ class GRASPVND:
                         new_route
                     )
                     if new_route_feasible:
+                        route_cost = self._problem.evaluate_route_cost(route)
                         new_route_cost = self._problem.evaluate_route_cost(new_route)
                         if new_route_cost < route_cost:
+                            solution_cost = self._problem.evaluate(solution)
                             solution.remove(route)
                             solution.add(new_route)
+                            new_solution_cost = self._problem.evaluate(solution)
                             route = new_route
-                            route_cost = new_route_cost
                             improves = True
             if len(solution) == 1:
                 continue
@@ -337,23 +351,29 @@ class GRASPVND:
                             new_route2_cost = self._problem.evaluate_route_cost(
                                 new_route2
                             )
+                            route1_cost = self._problem.evaluate_route_cost(route_1)
+                            route2_cost = self._problem.evaluate_route_cost(route_2)
                             if (
                                 new_route1_cost + new_route2_cost
-                                < route_cost + route_cost
+                                < route1_cost + route2_cost
                             ):
+                                solution_cost = self._problem.evaluate(solution)
                                 solution.remove(route_1)
                                 solution.remove(route_2)
                                 solution.add(new_route1)
                                 solution.add(new_route2)
+                                new_solution_cost = self._problem.evaluate(solution)
                                 route_1 = new_route1
                                 route_2 = new_route2
-                                route_cost = new_route1_cost + new_route2_cost
                                 improves = True
                     except NotImplementedError:
                         pass
         return solution
 
     def _one_one_swap(self, route: Tuple[int]) -> Tuple[int]:
+        """
+        Swap two random nodes in a route, excluding the first and last nodes.
+        """
         if len(route) < 4:
             return route
         route = list(route)
@@ -362,6 +382,9 @@ class GRASPVND:
         return tuple(route)
 
     def _adjacent_swap(self, route: Tuple[int]) -> Tuple[int]:
+        """
+        Swap two adjacent nodes in a route, excluding the first and last nodes.
+        """
         if len(route) < 4:
             return route
         route = list(route)
@@ -370,10 +393,13 @@ class GRASPVND:
         return tuple(route)
 
     def _two_opt(self, route: Tuple[int]) -> Tuple[int]:
+        """
+        Swap two random nodes in a route, excluding the first and last nodes.
+        """
         if len(route) < 4:
             return route
         route = list(route)
-        i, j = random.sample(range(1, len(route) - 2), 2)
+        i, j = random.sample(range(1, len(route) - 1), 2)
         if i > j:
             i, j = j, i
         route[i : j + 1] = route[i : j + 1][::-1]
@@ -382,37 +408,120 @@ class GRASPVND:
     def _one_zero_relocation(
         self, route_1: Tuple[int], route_2: Tuple[int]
     ) -> Tuple[Tuple[int], Tuple[int]]:
+        """
+        Relocate a random node from route 1 to a random position in route 2,
+        excluding the first and last nodes.
+        """
         if len(route_1) < 3:
             return route_1, route_2
         route_1 = list(route_1)
         route_2 = list(route_2)
         i = random.randint(1, len(route_1) - 2)
         node = route_1.pop(i)
-        j = random.randint(1, len(route_2) - 2)
+        j = random.randint(1, len(route_2) - 1)
         route_2.insert(j, node)
         return tuple(route_1), tuple(route_2)
 
     def _two_zero_relocation(
         self, route_1: Tuple[int], route_2: Tuple[int]
     ) -> Tuple[Tuple[int], Tuple[int]]:
-        raise NotImplementedError
+        """
+        Relocate two random nodes from route 1 to a random position in route 2,
+        excluding the first and last nodes.
+        """
+        if len(route_1) < 4:
+            return route_1, route_2
+        route_1 = list(route_1)
+        route_2 = list(route_2)
+        i = random.randint(1, len(route_1) - 3)
+        node_1 = route_1.pop(i)
+        node_2 = route_1.pop(i)
+        j = random.randint(1, len(route_2) - 1)
+        route_2.insert(j, node_1)
+        route_2.insert(j, node_2)
+        return tuple(route_1), tuple(route_2)
 
     def _one_one_exchange(
         self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    ) -> Tuple[Tuple[int], Tuple[int]]:
+        """
+        Swap a random node from route 1 with a random node from route 2,
+        excluding the first and last nodes.
+        """
+        if len(route_1) < 3 or len(route_2) < 3:
+            return route_1, route_2
+        route_1 = list(route_1)
+        route_2 = list(route_2)
+        i = random.randint(1, len(route_1) - 2)
+        j = random.randint(1, len(route_2) - 2)
+        route_1[i], route_2[j] = route_2[j], route_1[i]
+        return tuple(route_1), tuple(route_2)
 
     def _two_one_exchange(
         self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    ) -> Tuple[Tuple[int], Tuple[int]]:
+        """
+        Swap two random nodes from route 1 with a random node from route 2,
+        excluding the first and last nodes.
+        """
+        if len(route_1) < 4 or len(route_2) < 3:
+            return route_1, route_2
+        route_1 = list(route_1)
+        route_2 = list(route_2)
+        i = random.randint(1, len(route_1) - 3)
+        node_1 = route_1.pop(i)
+        node_2 = route_1.pop(i)
+        j = random.randint(1, len(route_2) - 1)
+        route_2.insert(j, node_1)
+        route_2.insert(j, node_2)
+        return tuple(route_1), tuple(route_2)
 
     def _two_two_exchange(
         self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    ) -> Tuple[Tuple[int], Tuple[int]]:
+        """
+        Swap two random nodes from route 1 with two random nodes from route 2,
+        excluding the first and last nodes.
+        """
+        if len(route_1) < 4 or len(route_2) < 4:
+            return route_1, route_2
+        route_1 = list(route_1)
+        route_2 = list(route_2)
+        i = random.randint(1, len(route_1) - 3)
+        node_1 = route_1.pop(i)
+        node_2 = route_1.pop(i)
+        j = random.randint(1, len(route_2) - 3)
+        node_3 = route_2.pop(j)
+        node_4 = route_2.pop(j)
+        route_1.insert(i, node_4)
+        route_1.insert(i, node_3)
+        route_2.insert(j, node_2)
+        route_2.insert(j, node_1)
+        return tuple(route_1), tuple(route_2)
 
     def _three_three_exchange(
         self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    ) -> Tuple[Tuple[int], Tuple[int]]:
+        """
+        Swap three random nodes from route 1 with three random nodes from route 2,
+        excluding the first and last nodes.
+        """
+        if len(route_1) < 5 or len(route_2) < 5:
+            return route_1, route_2
+        route_1 = list(route_1)
+        route_2 = list(route_2)
+        i = random.randint(1, len(route_1) - 4)
+        node_1 = route_1.pop(i)
+        node_2 = route_1.pop(i)
+        node_3 = route_1.pop(i)
+        j = random.randint(1, len(route_2) - 4)
+        node_4 = route_2.pop(j)
+        node_5 = route_2.pop(j)
+        node_6 = route_2.pop(j)
+        route_1.insert(i, node_6)
+        route_1.insert(i, node_5)
+        route_1.insert(i, node_4)
+        route_2.insert(j, node_3)
+        route_2.insert(j, node_2)
+        route_2.insert(j, node_1)
+        return tuple(route_1), tuple(route_2)

@@ -59,7 +59,7 @@ class CUAVRP:
 
     def evaluate_route_cost(self, route: list) -> float:
         """Returns the cost of a route."""
-        if len(route) == 1:
+        if len(route) < 3:
             return 0
         edge_lengths = [
             self._graph.edges[route[i - 1], route[i]]["weight"]
@@ -69,7 +69,7 @@ class CUAVRP:
 
     def evaluate_route_length(self, route: list) -> float:
         """Returns the length of a route."""
-        if len(route) == 1:
+        if len(route) < 3:
             return 0
         edge_lengths = [
             self._graph.edges[route[i - 1], route[i]]["weight"]
@@ -89,8 +89,12 @@ class CUAVRP:
 
     def plot_solution(self, solution: Set[Tuple[int]]):
         fig, ax = plt.subplots(figsize=(7, 7))
-        netx.draw_networkx(
-            self.graph, ax=ax, pos=netx.get_node_attributes(self.graph, "pos")
+        # plot just nodes
+        netx.draw_networkx_nodes(
+            self.graph,
+            ax=ax,
+            pos=netx.get_node_attributes(self.graph, "pos"),
+            node_color="black",
         )
         for route in solution:
             if len(route) == 1:
