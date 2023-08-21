@@ -8,6 +8,7 @@ import numpy as np
 
 from problem import CUAVRP
 from utils import euclidean_distance
+from tqdm.auto import tqdm
 
 
 class ConstructiveHeuristic:
@@ -22,6 +23,13 @@ class ConstructiveHeuristic:
         self._r_d = r_d
 
     def construct_feasible_solution(self) -> Set[Tuple[int]]:
+        """
+        Constructs a feasible solution for the problem.
+
+        Returns:
+            A set of tuples, each tuple representing a route.
+        """
+        random.seed()
         is_infeasible = True
         while is_infeasible:
             is_infeasible = False
@@ -200,7 +208,7 @@ class GRASPVND:
     def run(self):
         best_solution_found = None
         best_solution_cost = None
-        for i in range(self._grasp_iters):
+        for i in tqdm(range(self._grasp_iters), position=0, leave=True, unit="it"):
             best_constructed = (
                 self._constructive_heuristic.construct_feasible_solution()
             )
@@ -219,6 +227,10 @@ class GRASPVND:
             ):
                 best_solution_found = improved_solution
                 best_solution_cost = improved_solution_cost
+                print(
+                    f"Found new best solution with cost {best_solution_cost} at iteration {i}"
+                )
+                print(f"Best solution found so far: {best_solution_found}")
             # self.intensification_method(best_solution_found)
         return best_solution_found
 
@@ -268,45 +280,121 @@ class GRASPVND:
         raise NotImplementedError
 
     def _vnd(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
+        random.seed()
         for i in range(self._vnd_iters):
-            routes = random.sample(solution, 2)
-            route_1 = copy.deepcopy(routes[0])
-            route_2 = copy.deepcopy(routes[1])
-            for move in LocalMoves:
+            route = tuple(random.sample(solution, 1)[0])
+            route_cost = self._problem.evaluate_route_cost(route)
+            for move in [
+                LocalMoves.ONE_ONE_SWAP,
+                LocalMoves.ADJACENT_SWAP,
+                LocalMoves.TWO_OPT,
+            ]:
                 improves = True
                 move_func = getattr(self, "_" + move.name.lower())
                 while improves:
-                    route_1, route_2, improves = move_func(route_1, route_2)
-                    if improves:
-                        solution.remove(routes[0])
-                        solution.remove(routes[1])
-                        solution.add(tuple(route_1))
-                        solution.add(tuple(route_2))
+                    improves = False
+                    new_route = move_func(route)
+                    new_route_feasible = self._problem.check_route_feasibility(
+                        new_route
+                    )
+                    if new_route_feasible:
+                        new_route_cost = self._problem.evaluate_route_cost(new_route)
+                        if new_route_cost < route_cost:
+                            solution.remove(route)
+                            solution.add(new_route)
+                            route = new_route
+                            route_cost = new_route_cost
+                            improves = True
+            if len(solution) == 1:
+                continue
+            routes = random.sample(solution, 2)
+            route_1 = copy.deepcopy(routes[0])
+            route_2 = copy.deepcopy(routes[1])
+            for move in [
+                LocalMoves.ONE_ZERO_RELOCATION,
+                LocalMoves.TWO_ZERO_RELOCATION,
+                LocalMoves.ONE_ONE_EXCHANGE,
+                LocalMoves.TWO_ONE_EXCHANGE,
+                LocalMoves.TWO_TWO_EXCHANGE,
+                LocalMoves.THREE_THREE_EXCHANGE,
+            ]:
+                improves = True
+                move_func = getattr(self, "_" + move.name.lower())
+                while improves:
+                    improves = False
+                    try:
+                        new_route1, new_route2 = move_func(route_1, route_2)
+                        new_route1_feasible = self._problem.check_route_feasibility(
+                            new_route1
+                        )
+                        new_route2_feasible = self._problem.check_route_feasibility(
+                            new_route2
+                        )
+                        if new_route1_feasible and new_route2_feasible:
+                            new_route1_cost = self._problem.evaluate_route_cost(
+                                new_route1
+                            )
+                            new_route2_cost = self._problem.evaluate_route_cost(
+                                new_route2
+                            )
+                            if (
+                                new_route1_cost + new_route2_cost
+                                < route_cost + route_cost
+                            ):
+                                solution.remove(route_1)
+                                solution.remove(route_2)
+                                solution.add(new_route1)
+                                solution.add(new_route2)
+                                route_1 = new_route1
+                                route_2 = new_route2
+                                route_cost = new_route1_cost + new_route2_cost
+                                improves = True
+                    except NotImplementedError:
+                        pass
         return solution
 
-    def _one_one_swap(
-        self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    def _one_one_swap(self, route: Tuple[int]) -> Tuple[int]:
+        if len(route) < 4:
+            return route
+        route = list(route)
+        i, j = random.sample(range(1, len(route) - 1), 2)
+        route[i], route[j] = route[j], route[i]
+        return tuple(route)
 
-    def _adjacent_swap(
-        self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    def _adjacent_swap(self, route: Tuple[int]) -> Tuple[int]:
+        if len(route) < 4:
+            return route
+        route = list(route)
+        i = random.randint(1, len(route) - 3)
+        route[i], route[i + 1] = route[i + 1], route[i]
+        return tuple(route)
 
-    def _two_opt(
-        self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    def _two_opt(self, route: Tuple[int]) -> Tuple[int]:
+        if len(route) < 4:
+            return route
+        route = list(route)
+        i, j = random.sample(range(1, len(route) - 2), 2)
+        if i > j:
+            i, j = j, i
+        route[i : j + 1] = route[i : j + 1][::-1]
+        return tuple(route)
 
     def _one_zero_relocation(
         self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
-        raise NotImplementedError
+    ) -> Tuple[Tuple[int], Tuple[int]]:
+        if len(route_1) < 3:
+            return route_1, route_2
+        route_1 = list(route_1)
+        route_2 = list(route_2)
+        i = random.randint(1, len(route_1) - 2)
+        node = route_1.pop(i)
+        j = random.randint(1, len(route_2) - 2)
+        route_2.insert(j, node)
+        return tuple(route_1), tuple(route_2)
 
     def _two_zero_relocation(
         self, route_1: Tuple[int], route_2: Tuple[int]
-    ) -> Tuple[Tuple[int], Tuple[int], bool]:
+    ) -> Tuple[Tuple[int], Tuple[int]]:
         raise NotImplementedError
 
     def _one_one_exchange(

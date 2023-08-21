@@ -1,3 +1,4 @@
+from typing import Set, Tuple
 import networkx as netx
 import numpy as np
 import seaborn as sns
@@ -53,9 +54,54 @@ class CUAVRP:
         for route in solution:
             if len(route) == 1:
                 continue
-            edge_lengths = [
-                self._graph.edges[route[i - 1], route[i]]["weight"]
-                for i in range(1, len(route))
-            ]
-            total_cost += sum(np.cumsum(edge_lengths))
+            total_cost += self.evaluate_route_cost(route)
         return total_cost
+
+    def evaluate_route_cost(self, route: list) -> float:
+        """Returns the cost of a route."""
+        if len(route) == 1:
+            return 0
+        edge_lengths = [
+            self._graph.edges[route[i - 1], route[i]]["weight"]
+            for i in range(1, len(route))
+        ]
+        return sum(np.cumsum(edge_lengths))
+
+    def evaluate_route_length(self, route: list) -> float:
+        """Returns the length of a route."""
+        if len(route) == 1:
+            return 0
+        edge_lengths = [
+            self._graph.edges[route[i - 1], route[i]]["weight"]
+            for i in range(1, len(route))
+        ]
+        return sum(edge_lengths)
+
+    def check_route_feasibility(self, route: list) -> bool:
+        """Checks if a route is feasible."""
+        if len(route) in [1, 2] and set(route) == set([0]):
+            return True
+        if self.evaluate_route_cost(route) > self.max_travel_time:
+            return False
+        if route[0] != 0 or route[-1] != 0:
+            return False
+        return True
+
+    def plot_solution(self, solution: Set[Tuple[int]]):
+        fig, ax = plt.subplots(figsize=(7, 7))
+        netx.draw_networkx(
+            self.graph, ax=ax, pos=netx.get_node_attributes(self.graph, "pos")
+        )
+        for route in solution:
+            if len(route) == 1:
+                continue
+            netx.draw_networkx_edges(
+                self.graph,
+                ax=ax,
+                pos=netx.get_node_attributes(self.graph, "pos"),
+                edgelist=[(route[i - 1], route[i]) for i in range(1, len(route))],
+                edge_color=np.random.rand(
+                    3,
+                ),
+            )
+        plt.savefig("solution.png")

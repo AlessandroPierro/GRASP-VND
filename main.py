@@ -9,19 +9,20 @@ if __name__ == "__main__":
         density=0.6,
         distance_fn=euclidean_distance,
         num_uavs=3,
-        max_travel_time=15,
+        max_travel_time=14,
     )
 
     grasp = GRASPVND(
         problem=problem,
-        grasp_iters=10,
+        grasp_iters=250,
         num_constructed=5,
-        vnd_iters=1,
-        thread_strategy=ThreadStrategy.RANDOM_RETURN,
+        vnd_iters=100,
+        thread_strategy=ThreadStrategy.ALL_RETURN,
         num_threads=6,
-        alpha=0.8,
+        alpha=0.6,
         w_0=0.4,
         r_d=1,
     )
-    for i in range(10):
-        print(grasp.run())
+
+    solution = grasp.run()
+    problem.plot_solution(solution)
