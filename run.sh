@@ -1,16 +1,13 @@
 #!/bin/bash
 
-# Set the number of problems to run
-NUM_PROBLEMS=10
-
-# do we need to activate the venv first?
 source venv/bin/activate
 
-# Define the command to run for each problem
-COMMAND="python run_experiment.py --m 4 --n 4 --density 0.5 --num_uavs 2 --max_travel_time 16 --problem_seed {} --grasp_iters 100 --num_constructed 10 --vnd_iters 10 --thread_strategy ALL_RETURN --num_threads 3 --alpha 0.5 --w_0 0.4 --r_d 1 --algorithm_seed 0"
+seeds=( 1 2 3 4 5 )
 
-# Generate a list of problem seeds to run
-SEEDS=$(seq 0 $((NUM_PROBLEMS-1)))
+strategies=( "ALL_RETURN" "RANDOM_RETURN" "BEST_CONTINUE" )
 
-# Run the commands in parallel using GNU Parallel, limiting to 4 jobs at a time, with a progress bar
-parallel --bar -j 4 "$COMMAND" ::: $SEEDS
+parallel --bar --jobs 3 --delay 5s python3 run_experiment.py --algorithm_seed {1} --thread_strategy {2} --m 4 --n 4 --density 0.5 --num_uavs 2 --max_travel_time 16  ::: "${seeds[@]}" ::: "${strategies[@]}" 
+parallel --bar --jobs 3 --delay 5s python3 run_experiment.py --algorithm_seed {1} --thread_strategy {2} --m 8 --n 8 --density 0.25 --num_uavs 2 --max_travel_time 32  ::: "${seeds[@]}" ::: "${strategies[@]}"
+parallel --bar --jobs 3 --delay 5s python3 run_experiment.py --algorithm_seed {1} --thread_strategy {2} --m 10 --n 10 --density 0.25 --num_uavs 4 --max_travel_time 32  ::: "${seeds[@]}" ::: "${strategies[@]}"
+parallel --bar --jobs 3 --delay 5s python3 run_experiment.py --algorithm_seed {1} --thread_strategy {2} --m 12 --n 12 --density 0.25 --num_uavs 8 --max_travel_time 64  ::: "${seeds[@]}" ::: "${strategies[@]}"
+parallel --bar --jobs 3 --delay 5s python3 run_experiment.py --algorithm_seed {1} --thread_strategy {2} --m 14 --n 14 --density 0.125 --num_uavs 8 --max_travel_time 64  ::: "${seeds[@]}" ::: "${strategies[@]}"

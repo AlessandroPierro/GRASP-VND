@@ -1,14 +1,15 @@
 import copy
-from enum import Enum
 import multiprocessing
 import random
+from enum import Enum
 from typing import Any, List, Set, Tuple
 
 import numpy as np
+import pandas as pd
+from tqdm.auto import tqdm
 
 from problem import CUAVRP
 from utils import euclidean_distance
-from tqdm.auto import tqdm
 
 
 class ConstructiveHeuristic:
@@ -28,16 +29,22 @@ class ConstructiveHeuristic:
         divertisication_method(solution: set) -> set: Applies a diversification method to the solution (not implemented).
     """
 
-    def __init__(self, problem: CUAVRP, alpha: float, w_0: float, r_d: float) -> None:
+    def __init__(
+        self, problem: CUAVRP, alpha: float, w_0: float, r_d: float, r_i: float
+    ) -> None:
         self._problem = problem
         self._weights = w_0 * np.ones((problem.num_nodes, problem.num_nodes))
         self._alpha = alpha
         self._r_d = r_d
+        self._r_i = r_i
 
     def construct_feasible_solution(self) -> Set[Tuple[int]]:
         random.seed()
         is_infeasible = True
+        solution = None
         while is_infeasible:
+            if solution is not None:
+                self.divertisication_method(solution)
             is_infeasible = False
             next: int = 0
             route = [next]
@@ -47,7 +54,7 @@ class ConstructiveHeuristic:
                 rcl = self.generate_rcl(remaining_nodes, route)
                 if rcl is not None:
                     rcl.add(0)
-                    next = self.weighted_choice(rcl)
+                    next = self.weighted_choice(rcl, route)
                     route.append(next)
                     if next != 0:
                         remaining_nodes.remove(next)
@@ -103,7 +110,6 @@ class ConstructiveHeuristic:
                 route = list(reversed(route))
             solution.add(tuple(route))
             is_infeasible = False
-            # self.divertisication_method(solution)
         return solution
 
     def generate_rcl(self, candidates: Set[int], route: List[int]) -> Set[int]:
@@ -155,13 +161,25 @@ class ConstructiveHeuristic:
         else:
             return set(candidates)
 
-    def weighted_choice(self, rcl: Set[int]) -> int:
-        return random.choices(
-            list(rcl), weights=list(map(lambda k: self._weights[0, k], rcl))
-        )[0]
+    def weighted_choice(self, rcl: Set[int], route: List[int]) -> int:
+        weights = list(map(lambda k: self._weights[route[-1], k], rcl))
+        if sum(weights) == 0:
+            return random.choices(list(rcl))[0]
+        else:
+            return random.choices(list(rcl), weights=weights)[0]
 
     def divertisication_method(self, solution: set) -> set:
-        raise NotImplementedError
+        return
+        for route in solution:
+            if len(route) > 3:
+                for i in range(1, len(route)):
+                    self._weights[route[i - 1], route[i]] *= 1 - self._r_d
+
+    def intensification_method(self, solution: set) -> set:
+        for route in solution:
+            if len(route) > 3:
+                for i in range(1, len(route)):
+                    self._weights[route[i - 1], route[i]] *= 1 + self._r_i
 
 
 class ThreadStrategy(Enum):
@@ -194,6 +212,7 @@ class GRASPVND:
         alpha: float,
         w_0: float,
         r_d: float,
+        r_i: float,
         seed: int = None,
     ) -> None:
         self._problem = problem
@@ -205,10 +224,13 @@ class GRASPVND:
         self._alpha = alpha
         self._w_0 = w_0
         self._r_d = r_d
-        self._constructive_heuristic = ConstructiveHeuristic(problem, alpha, w_0, r_d)
+        self._constructive_heuristic = ConstructiveHeuristic(
+            problem, alpha, w_0, r_d, r_i
+        )
 
         self._best_continue_solution = None
         self._random_return_solution = None
+        self._data = []
 
     def run(self):
         best_solution_found = None
@@ -245,8 +267,24 @@ class GRASPVND:
                     f"Local search found new best solution with cost {best_solution_cost} at iteration {i}"
                 )
                 print(f"New best solution is {best_solution_found}")
+            self._record_results(best_solution_found, best_solution_cost, i)
             # self.intensification_method(best_solution_found)
         return best_solution_found
+
+    def _record_results(
+        self, solution: Set[Tuple[int]], cost: float, iteration: int
+    ) -> None:
+        self._data.append(
+            {
+                "iteration": iteration,
+                "cost": cost,
+                "solution": solution,
+            }
+        )
+
+    def save_results(self, filename: str) -> None:
+        df = pd.DataFrame(self._data)
+        df.to_csv(filename, index=False)
 
     def _apply_thread_strategy(self, solution: Set[Tuple[int]]) -> Set[Tuple[int]]:
         pool = multiprocessing.Pool(self._num_threads)
@@ -255,6 +293,8 @@ class GRASPVND:
                 self._vnd,
                 map(lambda k: copy.deepcopy(solution), range(self._num_threads)),
             )
+            for solution in results:
+                self._constructive_heuristic.intensification_method(solution)
             improved_solution = min(results, key=lambda k: self._problem.evaluate(k))
         elif self._thread_strategy == ThreadStrategy.BEST_CONTINUE:
             if self._best_continue_solution is None:
@@ -268,6 +308,8 @@ class GRASPVND:
                     range(self._num_threads),
                 ),
             )
+            for solution in results:
+                self._constructive_heuristic.intensification_method(solution)
             improved_solution = min(results, key=lambda k: self._problem.evaluate(k))
             self._best_continue_solution = copy.deepcopy(improved_solution)
         elif self._thread_strategy == ThreadStrategy.RANDOM_RETURN:
@@ -282,6 +324,8 @@ class GRASPVND:
                     range(self._num_threads),
                 ),
             )
+            for solution in results:
+                self._constructive_heuristic.intensification_method(solution)
             improved_solution = min(results, key=lambda k: self._problem.evaluate(k))
             self._random_return_solution = copy.deepcopy(random.choice(results))
         else:
