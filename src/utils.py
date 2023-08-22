@@ -23,10 +23,12 @@ def create_random_problem(
     distance_fn: Callable[[Point, Point], float],
     num_uavs: int,
     max_travel_time: float,
+    seed: int = None,
 ) -> CUAVRP:
     """
     Utility function to instantiate a random CUAVRP problem.
     """
+    random.seed(seed)
     points = random.sample(
         list(map(lambda i: (i // m, i % m), range(m * n))), int(m * n * density)
     )
@@ -41,13 +43,3 @@ def create_random_problem(
             )
 
     return CUAVRP(graph=graph, num_uavs=num_uavs, max_travel_time=max_travel_time)
-
-
-create_random_problem(
-    m=5,
-    n=10,
-    density=0.4,
-    distance_fn=euclidean_distance,
-    num_uavs=3,
-    max_travel_time=10,
-)

@@ -194,6 +194,7 @@ class GRASPVND:
         alpha: float,
         w_0: float,
         r_d: float,
+        seed: int = None,
     ) -> None:
         self._problem = problem
         self._grasp_iters = grasp_iters
