@@ -4,6 +4,9 @@ import numpy as np
 import seaborn as sns
 from matplotlib import pyplot as plt
 
+import gurobipy as gp
+from gurobipy import GRB
+
 sns.set_theme(style="white")
 
 
@@ -109,3 +112,97 @@ class CUAVRP:
                 ),
             )
         plt.savefig("solution.png")
+
+
+    def to_gurobi_model(self, G: float):
+        """Implement model in Gurobi."""
+        model = gp.Model("CUAVRP")
+
+        V = range(self.num_nodes+1)
+        V_prime = range(1, self.num_nodes)
+        V_without_last = range(self.num_nodes)
+        R = range(self.num_uavs)
+            
+        def u(problem, i, j):
+            if i == j:
+                return 0
+            if i == len(V)-1:
+                i = 0
+            if j == len(V)-1:
+                j = 0
+            if i == j:
+                return 0
+            try:
+                weight = problem.graph.edges[i, j]["weight"]
+            except KeyError:
+                print(i, j)
+            weight = problem.graph.edges[i, j]["weight"]
+            return weight
+            
+        
+        t = model.addVars(
+            len(R), len(V), vtype=GRB.CONTINUOUS
+        )
+        x = model.addVars(
+            len(R), len(V), len(V), vtype=GRB.BINARY
+        )
+        for k in R:
+            for i in V:
+                x[k, i, i].ub = 0
+
+        # objective function (1)
+        model.setObjective(
+            gp.quicksum(t[k, i] for k in R for i in V_prime),
+            GRB.MINIMIZE,
+        )
+
+        # constraint (2)
+        model.addConstrs(
+            gp.quicksum(x[k, i, j] for j in V)
+            == gp.quicksum(x[k, j, i] for j in V)
+            for k in R
+            for i in V_prime
+        )
+
+        # constraint (3)
+        model.addConstrs(
+            gp.quicksum(x[k, i, j] for j in V) == 1
+            for k in R
+            for i in V_prime
+        )
+
+        # constraint (4)
+        model.addConstrs(
+            gp.quicksum(x[k, 0, j] for j in V) == 1
+            for k in R
+        )
+
+        # constraint (5)
+        model.addConstrs(
+            gp.quicksum(x[k, j, len(V)-1] for j in V) == 1
+            for k in R
+        )
+
+        # constraint (6)
+        model.addConstrs(
+            gp.quicksum(x[k, i, j]*u(self, i, j) for i in V for j in V) <= self.max_travel_time
+            for k in R
+        )
+
+        # constraint (7)
+        model.addConstrs(
+            t[k, i] + u(self, i, j) <= t[k, j] + G*(1-x[k, i, j])
+            for i in V_without_last
+            for j in V
+            for k in R
+        )
+
+        # constraint (8)
+        model.addConstrs(
+            t[k, i] >= 0 for k in R for i in V
+        )
+
+        return model
+
+
+
