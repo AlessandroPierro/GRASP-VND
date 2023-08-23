@@ -113,42 +113,38 @@ class CUAVRP:
             )
         plt.savefig("solution.png")
 
-
     def to_gurobi_model(self, G: float):
         """Implement model in Gurobi."""
         model = gp.Model("CUAVRP")
 
-        V = range(self.num_nodes+1)
-        V_prime = range(1, self.num_nodes)
-        V_without_last = range(self.num_nodes)
+        N_PLUS_ONE = self.num_nodes
+
+        V = range(N_PLUS_ONE + 1)
+        V_prime = range(1, N_PLUS_ONE)
+        V_without_last = range(N_PLUS_ONE)
         R = range(self.num_uavs)
-            
+
         def u(problem, i, j):
             if i == j:
                 return 0
-            if i == len(V)-1:
+            if i == N_PLUS_ONE:
                 i = 0
-            if j == len(V)-1:
+            if j == N_PLUS_ONE:
                 j = 0
             if i == j:
                 return 0
-            try:
-                weight = problem.graph.edges[i, j]["weight"]
-            except KeyError:
-                print(i, j)
             weight = problem.graph.edges[i, j]["weight"]
+            assert weight >= 0
             return weight
-            
-        
+
         t = model.addVars(
-            len(R), len(V), vtype=GRB.CONTINUOUS
+            [(k, i) for k in R for i in V], vtype=GRB.CONTINUOUS, name="t"
         )
         x = model.addVars(
-            len(R), len(V), len(V), vtype=GRB.BINARY
+            [(k, i, j) for k in R for i in V_without_last for j in V if i != j],
+            vtype=GRB.BINARY,
+            name="x",
         )
-        for k in R:
-            for i in V:
-                x[k, i, i].ub = 0
 
         # objective function (1)
         model.setObjective(
@@ -158,51 +154,70 @@ class CUAVRP:
 
         # constraint (2)
         model.addConstrs(
-            gp.quicksum(x[k, i, j] for j in V)
-            == gp.quicksum(x[k, j, i] for j in V)
-            for k in R
-            for i in V_prime
+            (
+                gp.quicksum(x[k, i, j] for j in V if i != j)
+                == gp.quicksum(x[k, j, i] for j in V_without_last if i != j)
+                for k in R
+                for i in V_prime
+            ),
+            name="constraint_2 - flow conservation",
         )
 
         # constraint (3)
         model.addConstrs(
-            gp.quicksum(x[k, i, j] for j in V) == 1
-            for k in R
-            for i in V_prime
+            (
+                gp.quicksum(x[k, i, j] for j in V if i != j) == 1
+                for k in R
+                for i in V_prime
+            ),
+            name="constraint_3 - node visit",
         )
 
         # constraint (4)
         model.addConstrs(
-            gp.quicksum(x[k, 0, j] for j in V) == 1
-            for k in R
+            (gp.quicksum(x[k, 0, j] for j in V if j != 0) == 1 for k in R),
+            name="constraint_4 - route start",
         )
 
         # constraint (5)
         model.addConstrs(
-            gp.quicksum(x[k, j, len(V)-1] for j in V) == 1
-            for k in R
+            (
+                gp.quicksum(x[k, j, len(V) - 1] for j in V if j != (len(V) - 1)) == 1
+                for k in R
+            ),
+            name="constraint_5 - route end",
         )
 
         # constraint (6)
         model.addConstrs(
-            gp.quicksum(x[k, i, j]*u(self, i, j) for i in V for j in V) <= self.max_travel_time
-            for k in R
+            (
+                gp.quicksum(
+                    x[k, i, j] * u(self, i, j)
+                    for i in V_without_last
+                    for j in V
+                    if i != j
+                )
+                <= self.max_travel_time
+                for k in R
+            ),
+            name="constraint_6 - route length",
         )
 
         # constraint (7)
         model.addConstrs(
-            t[k, i] + u(self, i, j) <= t[k, j] + G*(1-x[k, i, j])
-            for i in V_without_last
-            for j in V
-            for k in R
+            (
+                -t[k, i] + t[k, j] - G * x[k, i, j] <= u(self, i, j) - G
+                for i in V_without_last
+                for j in V_prime
+                for k in R
+                if i != j
+            ),
+            name="constraint_7 - arrival time",
         )
 
         # constraint (8)
-        model.addConstrs(
-            t[k, i] >= 0 for k in R for i in V
-        )
+        for k in R:
+            for i in V:
+                t[k, i].lb = 0
 
-        return model
-
-
-
+        return model, t, x
