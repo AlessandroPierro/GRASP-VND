@@ -140,11 +140,23 @@ class CUAVRP:
         t = model.addVars(
             [(k, i) for k in R for i in V], vtype=GRB.CONTINUOUS, name="t"
         )
+        x_indices = []
+        for k in R:
+            for i in V_without_last:
+                for j in V_prime:
+                    if i != j:
+                        x_indices.append((k, i, j))
+            for j in V_without_last:
+                x_indices.append((k, j, N_PLUS_ONE))
+
         x = model.addVars(
-            [(k, i, j) for k in R for i in V_without_last for j in V if i != j],
+            x_indices,
             vtype=GRB.BINARY,
             name="x",
         )
+
+        # update model
+        model.update()
 
         # objective function (1)
         model.setObjective(
@@ -155,8 +167,8 @@ class CUAVRP:
         # constraint (2)
         model.addConstrs(
             (
-                gp.quicksum(x[k, i, j] for j in V if i != j)
-                == gp.quicksum(x[k, j, i] for j in V_without_last if i != j)
+                gp.quicksum(x[k, j, i] for j in V_without_last if j != i)
+                == gp.quicksum(x[k, i, j] for j in range(1, N_PLUS_ONE+1) if i != j)
                 for k in R
                 for i in V_prime
             ),
@@ -166,8 +178,7 @@ class CUAVRP:
         # constraint (3)
         model.addConstrs(
             (
-                gp.quicksum(x[k, i, j] for j in V if i != j) == 1
-                for k in R
+                gp.quicksum(x[k, i, j] for j in range(1, N_PLUS_ONE+1) if i != j for k in R) == 1
                 for i in V_prime
             ),
             name="constraint_3 - node visit",
@@ -175,14 +186,14 @@ class CUAVRP:
 
         # constraint (4)
         model.addConstrs(
-            (gp.quicksum(x[k, 0, j] for j in V if j != 0) == 1 for k in R),
+            (gp.quicksum(x[k, 0, j] for j in range(1, N_PLUS_ONE+1)) == 1 for k in R),
             name="constraint_4 - route start",
         )
 
         # constraint (5)
         model.addConstrs(
             (
-                gp.quicksum(x[k, j, len(V) - 1] for j in V if j != (len(V) - 1)) == 1
+                gp.quicksum(x[k, j, N_PLUS_ONE] for j in V_without_last) == 1
                 for k in R
             ),
             name="constraint_5 - route end",
@@ -194,7 +205,7 @@ class CUAVRP:
                 gp.quicksum(
                     x[k, i, j] * u(self, i, j)
                     for i in V_without_last
-                    for j in V
+                    for j in range(1, N_PLUS_ONE+1)
                     if i != j
                 )
                 <= self.max_travel_time
@@ -203,12 +214,13 @@ class CUAVRP:
             name="constraint_6 - route length",
         )
 
+
         # constraint (7)
         model.addConstrs(
             (
-                -t[k, i] + t[k, j] - G * x[k, i, j] <= u(self, i, j) - G
+                t[k, i] + u(self, i, j) - (1 - x[k, i, j]) * G <= t[k, j]
                 for i in V_without_last
-                for j in V_prime
+                for j in range(1, N_PLUS_ONE+1)
                 for k in R
                 if i != j
             ),
@@ -219,5 +231,7 @@ class CUAVRP:
         for k in R:
             for i in V:
                 t[k, i].lb = 0
+
+        model.update()
 
         return model, t, x

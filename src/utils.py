@@ -35,11 +35,11 @@ def create_random_problem(
 
     graph = netx.Graph()
     for i in range(len(points)):
-        graph.add_node(i, pos=points[i])
+       graph.add_node(i, pos=points[i])
     for i in range(len(points)):
-        for j in range(i + 1, len(points)):
-            graph.add_edge(
-                i, j, weight=distance_fn(Point(*points[i]), Point(*points[j]))
-            )
+       for j in range(i + 1, len(points)):
+           graph.add_edge(
+               i, j, weight=distance_fn(Point(*points[i]), Point(*points[j]))
+           )
 
     return CUAVRP(graph=graph, num_uavs=num_uavs, max_travel_time=max_travel_time)

@@ -269,7 +269,7 @@ class GRASPVND:
                 print(f"New best solution is {best_solution_found}")
             self._record_results(best_solution_found, best_solution_cost, i)
             # self.intensification_method(best_solution_found)
-        return best_solution_found
+        return best_solution_found, best_solution_cost
 
     def _record_results(
         self, solution: Set[Tuple[int]], cost: float, iteration: int
